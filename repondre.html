@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Questionnaire</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#0a0e1a; --surface:#111827; --surface2:#1a2235; --border:#1e2d45; --accent:#00d4aa; --text:#e2e8f0; --muted:#64748b; --card:#141d2e; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'DM Sans',sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .container { width:100%; max-width:600px; }
+  .logo { font-family:'Syne',sans-serif; font-weight:800; font-size:1.2rem; text-align:center; margin-bottom:20px; }
+  .logo span { color:var(--accent); }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:16px; }
+  .title { font-family:'Syne',sans-serif; font-weight:700; font-size:1.2rem; color:var(--accent); margin-bottom:6px; }
+  .subtitle { font-size:0.85rem; color:var(--muted); margin-bottom:20px; }
+  .field { margin-bottom:16px; }
+  label { display:block; font-size:0.82rem; color:var(--accent); font-weight:600; margin-bottom:5px; }
+  input, select, textarea { background:var(--surface2); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:10px; width:100%; font-family:'DM Sans',sans-serif; font-size:0.9rem; outline:none; }
+  input:focus, select:focus { border-color:var(--accent); }
+  .btn { display:block; width:100%; padding:14px; border-radius:8px; font-family:'Syne',sans-serif; font-weight:700; font-size:1rem; cursor:pointer; border:none; background:var(--accent); color:#000; margin-top:20px; transition:.2s; }
+  .btn:hover { opacity:.9; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .success { text-align:center; padding:40px 20px; }
+  .success .icon { font-size:3rem; margin-bottom:16px; }
+  .success h2 { font-family:'Syne',sans-serif; color:var(--accent); margin-bottom:8px; }
+  .success p { color:var(--muted); font-size:0.9rem; }
+  .error-box { padding:12px; background:rgba(255,68,68,.1); border-left:4px solid #ff4444; border-radius:4px; font-size:.85rem; color:#ff6b6b; margin:10px 0; }
+  .loading { text-align:center; padding:60px 20px; color:var(--muted); }
+  .spinner { display:inline-block; width:32px; height:32px; border:3px solid rgba(0,212,170,.2); border-radius:50%; border-top-color:var(--accent); animation:spin 1s ease-in-out infinite; margin-bottom:16px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .required { color:#ff6b6b; margin-left:2px; }
+  .btn-another { display:block; width:100%; padding:12px; border-radius:8px; font-family:'Syne',sans-serif; font-weight:600; font-size:.9rem; cursor:pointer; border:1px solid var(--border); background:var(--surface2); color:var(--text); margin-top:10px; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="logo">Stat<span>Analyse</span> Pro</div>
+
+  <!-- État chargement -->
+  <div id="stateLoading" class="card loading">
+    <div class="spinner"></div>
+    <p>Chargement du questionnaire...</p>
+  </div>
+
+  <!-- État erreur -->
+  <div id="stateError" class="card" style="display:none">
+    <div class="error-box" id="errorMsg">Questionnaire introuvable.</div>
+  </div>
+
+  <!-- Formulaire -->
+  <div id="stateForm" style="display:none">
+    <div class="card">
+      <div class="title" id="formTitle"></div>
+      <div class="subtitle" id="formSubtitle"></div>
+      <div id="formFields"></div>
+      <div id="formError" class="error-box" style="display:none"></div>
+      <button class="btn" id="btnSubmit" onclick="submitResponse()">✅ Envoyer mes réponses</button>
+    </div>
+  </div>
+
+  <!-- Succès -->
+  <div id="stateSuccess" class="card success" style="display:none">
+    <div class="icon">🎉</div>
+    <h2>Réponse envoyée !</h2>
+    <p>Merci pour votre participation.</p>
+    <button class="btn-another" onclick="repondreEncore()">Remplir à nouveau</button>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://apzgbfbxxcafgpwznens.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwemdiZmJ4eGNhZmdwd3puZW5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExMzAyMjIsImV4cCI6MjA5NjcwNjIyMn0.Rek2vKIvbxJmM2afGKRVYNMq9QkTzdJLOfDspEH6fD4';
+
+let QUESTIONNAIRE = null;
+
+async function sbFetch(path, opts = {}) {
+  const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+    ...opts,
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': opts.prefer || '',
+      ...(opts.headers || {})
+    }
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function init() {
+  const params = new URLSearchParams(window.location.search);
+  const qid = params.get('q');
+  if (!qid) { showError('Lien invalide — aucun questionnaire spécifié.'); return; }
+
+  try {
+    const data = await sbFetch(`questionnaires?id=eq.${encodeURIComponent(qid)}&select=id,title,variables`);
+    if (!data || !data.length) { showError('Questionnaire introuvable ou expiré.'); return; }
+    QUESTIONNAIRE = data[0];
+    // Supabase peut retourner variables comme string JSON — normaliser
+    if (typeof QUESTIONNAIRE.variables === 'string') {
+      try { QUESTIONNAIRE.variables = JSON.parse(QUESTIONNAIRE.variables); } catch(e) { QUESTIONNAIRE.variables = []; }
+    }
+    if (!Array.isArray(QUESTIONNAIRE.variables)) QUESTIONNAIRE.variables = [];
+    renderForm();
+  } catch(e) {
+    showError('Erreur de connexion : ' + e.message);
+  }
+}
+
+function showError(msg) {
+  document.getElementById('stateLoading').style.display = 'none';
+  document.getElementById('stateError').style.display = 'block';
+  document.getElementById('errorMsg').textContent = msg;
+}
+
+function renderForm() {
+  document.getElementById('stateLoading').style.display = 'none';
+  document.getElementById('stateForm').style.display = 'block';
+
+  const vars = QUESTIONNAIRE.variables || [];
+  document.getElementById('formTitle').textContent = QUESTIONNAIRE.title || 'Questionnaire';
+  document.getElementById('formSubtitle').textContent = `${vars.length} question(s) — remplissez tous les champs`;
+
+  const fields = document.getElementById('formFields');
+  fields.innerHTML = vars.map((v, i) => {
+    let input = '';
+    if (v.type === 'list' && v.options && v.options.length) {
+      input = `<select id="field_${i}">
+        <option value="">-- Choisir --</option>
+        ${v.options.map(o => `<option value="${o}">${o}</option>`).join('')}
+      </select>`;
+    } else if (v.type === 'number') {
+      input = `<input type="number" id="field_${i}" placeholder="Entrez un nombre">`;
+    } else if (v.type === 'date') {
+      input = `<input type="date" id="field_${i}">`;
+    } else {
+      input = `<input type="text" id="field_${i}" placeholder="Votre réponse...">`;
+    }
+    return `<div class="field">
+      <label>${v.name}<span class="required">*</span></label>
+      ${input}
+    </div>`;
+  }).join('');
+}
+
+async function submitResponse() {
+  const vars = QUESTIONNAIRE.variables || [];
+  const data = {};
+  let hasEmpty = false;
+
+  vars.forEach((v, i) => {
+    const el = document.getElementById('field_' + i);
+    const val = el ? el.value.trim() : '';
+    if (!val) hasEmpty = true;
+    data[v.name] = val;
+  });
+
+  const errEl = document.getElementById('formError');
+  if (hasEmpty) {
+    errEl.style.display = 'block';
+    errEl.textContent = '⚠️ Veuillez remplir tous les champs.';
+    return;
+  }
+  errEl.style.display = 'none';
+
+  const btn = document.getElementById('btnSubmit');
+  btn.disabled = true;
+  btn.textContent = '⏳ Envoi en cours...';
+
+  try {
+    await sbFetch('responses', {
+      method: 'POST',
+      prefer: 'return=minimal',
+      body: JSON.stringify({ questionnaire_id: QUESTIONNAIRE.id, data })
+    });
+    document.getElementById('stateForm').style.display = 'none';
+    document.getElementById('stateSuccess').style.display = 'block';
+  } catch(e) {
+    errEl.style.display = 'block';
+    errEl.textContent = '❌ Erreur envoi : ' + e.message;
+    btn.disabled = false;
+    btn.textContent = '✅ Envoyer mes réponses';
+  }
+}
+
+function repondreEncore() {
+  document.getElementById('stateSuccess').style.display = 'none';
+  document.getElementById('stateForm').style.display = 'block';
+  // Reset champs
+  (QUESTIONNAIRE.variables || []).forEach((v, i) => {
+    const el = document.getElementById('field_' + i);
+    if (el) el.value = '';
+  });
+  document.getElementById('btnSubmit').disabled = false;
+  document.getElementById('btnSubmit').textContent = '✅ Envoyer mes réponses';
+}
+
+init();
+</script>
+</body>
+</html>
